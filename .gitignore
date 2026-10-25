@@ -1,0 +1,58 @@
+# This repo documents a METHOD. No real identity material ever belongs in it.
+# These rules are a physical backstop so a stray credential can't be committed by accident.
+
+# --- TLS / SIP identity material (the whole point: these live in a password manager, never here) ---
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.bks
+identity/
+secrets/
+creds/
+*.secret
+
+# --- SIP / pjsip account configs that would carry a real user, domain or password ---
+*.cfg
+pjsua.cfg
+account*.cfg
+sip-account*
+*.sipcreds
+
+# --- Captures & dumps that embed real identifiers (IP, SIP URI, FQDN, cert) ---
+*.pcap
+*.pcapng
+*.cap
+*.log
+dumps/
+captures/
+frida-dump*/
+*.hooklog
+
+# --- Build dirs for mbedTLS / pjproject (big, and may hold copied configs) ---
+build/
+*/build/
+mbedtls-*/
+pjproject-*/
+*.o
+*.a
+*.so
+*.so.*
+
+# --- Android / tooling cruft ---
+*.apk
+*.dex
+emulator*/
+*.frida
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
