@@ -470,8 +470,11 @@ header but actually encodes ~9 fps** (measured: ~268 frames over ~29.7 s). So an
 ffmpeg -i ring.avi -vf "select='eq(n,10)'" -frames:v 1 -q:v 2 out.jpg
 ```
 
-Frame 10 (~4 s after the `183`, once the stream has stabilised and the visitor is centred) gives a
-clean face. Verify the real rate yourself before trusting any timing:
+**`10` here is an example, not a magic number** — it's the frame *I* measured as clean (~4 s after
+the `183`, once the stream has stabilised and the visitor is centred), in daylight. The right index
+depends on your own ring timing and lighting (the IR illuminator at night changes it — see §10), so
+measure yours rather than copying `10`. The method — index, not seconds — is what transfers. Verify
+the real rate yourself before trusting any timing:
 
 ```bash
 ffprobe -v error -select_streams v:0 \
