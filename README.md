@@ -378,8 +378,12 @@ who could do it. If you want the real thing, the fix is **not** to trust the ven
 name (the CN won't match any name you can route to), it's to **pin the door's own server
 certificate**: capture the leaf cert the door presents (e.g. save it from the `ssl_client2` run in
 §5), trust *exactly that file*, and reject anything else. That gives you mutual authentication
-without needing a CN/SAN that matches your LAN address. Pinning is the honest endpoint here; the
-CA-less handshake is the quick start.
+without needing a CN/SAN that matches your LAN address — pinning compares the whole certificate, so
+"does the name match?" stops being the question. Note the practical catch: PJSIP's built-in
+`--tls-verify-server` still does *name* checking, so pinning isn't a flag you flip — you verify the
+presented cert against your saved copy yourself (a TLS verification callback, or an out-of-band
+fingerprint check at connect time). Pinning is the honest endpoint here; the CA-less handshake is
+the quick start.
 
 With that in place, the registrar accepts the account:
 
@@ -444,7 +448,8 @@ from a new contact is simply dropped.
 The way through is to **not** open a second registration at all: send the `MESSAGE` *through the
 client that is already registered*. In this project the ring-catcher (§9) exposes a tiny local
 command channel (an MQTT topic), and the open request is handed to it; it emits the SIP `MESSAGE`
-from its existing dialog. One registration, two jobs.
+from its already-registered endpoint (out of dialog — a `REGISTER` creates no dialog, and the open
+request isn't tied to a call). One registration, two jobs.
 
 > No real actuator address, method name, CN or SIP identity is published here — those are
 > device-specific and live only in the owner's vault (§7). What transfers is the shape: *decompile
@@ -543,8 +548,15 @@ Then at runtime the client just:
 
 - publishes JPEG bytes to `<prefix>/<node>/photo` (the camera updates instantly), and
 - on a message arriving at `<prefix>/<node>/open`, emits the matching SIP `MESSAGE` from its one
-  registered dialog (§8) — so an HA button, an automation, or a dashboard tap opens the door
+  registered endpoint (§8) — so an HA button, an automation, or a dashboard tap opens the door
   locally.
+
+> **Treat the open topic as what it is: a physical actuator.** Two non-negotiables. The command
+> message must be **`retain=false`** — a retained "open" would be replayed to the client every time
+> it reconnects, opening your gate on its own after a broker or client restart. (The *Discovery
+> config* above is `retain=true` on purpose, so entities survive a restart; the *command* never is.)
+> And the broker must enforce an **ACL** so only HA and this client can publish/subscribe to
+> `<prefix>/<node>/open` — an unauthenticated open topic is an unlocked gate on your LAN.
 
 The whole path — ring → early-media AVI → frame by index → JPEG → MQTT camera in HA, and HA button
 → MQTT → local SIP `MESSAGE` → relay — runs on your LAN, with the cloud never in the loop, and is
@@ -591,7 +603,8 @@ audio, ring notifications with a snapshot, and door/gate release — all via tha
 
 This project is the **local alternative**: no Netatmo account, no Firebase, no cloud in the loop. It
 registers directly to the door over **SIP-TLS** on the LAN using a client identity recovered from the
-app, and opens the door with a local in-dialog SIP `MESSAGE`. Where `deddroid/bticino-easykit` depends
+app, and opens the door with a local out-of-dialog SIP `MESSAGE` from that registered endpoint. Where
+`deddroid/bticino-easykit` depends
 on the internet staying up and the cloud service staying online, this one keeps working if the WAN is
 cut.
 
