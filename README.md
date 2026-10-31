@@ -15,6 +15,22 @@
 > [§8](#8-opening-the-door-locally)). Earlier write-ups (this one included, in an earlier revision)
 > claimed opening had to go through the vendor cloud over HTTPS. Reading the decompiled app
 > ([§2](#2-decompiling-the-app--the-backbone)) showed that is false: it is local, and it is proven.
+>
+> **What this repo is — read this before you judge reproducibility.** This is a **method with
+> proofs**, not a drop-in product. What ships here reproduces the hard, transferable parts: the
+> toolchain build, the decompile, the Frida identity capture, the TLS handshake and the SIP
+> `REGISTER` ([`scripts/`](scripts/)). The always-on client that ties it together — catch the ring,
+> write the AVI, pull the frame, publish over MQTT, emit the open `MESSAGE` ([§8](#8-opening-the-door-locally)/[§9](#9-catching-the-ring-and-grabbing-a-photo)) — runs in the author's
+> house and is what "proven in production" refers to, but it is **not published**: it is welded to
+> device-specific identifiers that must not leave the owner's vault ([§7](#7-handling-the-identity-safely)).
+> So: the handshake and register are reproducible from this repo today; the ring/photo/open service
+> you must assemble yourself from the documented shape in §8–§9. Publishing a cleanly anonymised
+> version of that service is the main open task.
+>
+> **One load-bearing caveat, up front:** the whole approach rides on **mbedTLS 3.6.x**, whose LTS
+> support ends around **March 2027**, because the door only speaks static-ECDH cipher suites that
+> mbedTLS 4.x and modern OpenSSL have removed. After that you are on an out-of-support TLS library
+> or your own fork. This is structural, not a detail — see [§4](#4-the-tls-wall-static-ecdh-and-why-openssl-wont-do).
 
 ## Why bother — planned obsolescence
 
@@ -44,6 +60,12 @@ rest. Everything is done on hardware you own, on your own LAN.
   they live in a password manager and are read on demand. See [§7](#7-handling-the-identity-safely).
 - **The whole chain is device-specific.** Your cipher-suite list, your SIP domain, your account
   format will differ. The *method* transfers; the values do not.
+- **"Against the app's terms" is not the same as "against the law".** Extracting your own identity
+  from the vendor app very likely breaches the app's terms of service. That is a contract question,
+  not a criminal one, and in many places interoperability and the right to repair *your own* hardware
+  are explicitly protected — but terms-of-service and the law are different things, your jurisdiction
+  is yours to check, and nothing here is legal advice. This is written for the owner acting on their
+  own device; don't read it as a licence to ignore local law.
 
 ---
 
@@ -281,6 +303,16 @@ reliable way is to make the app **provision again**: clear its data (or reinstal
 *under* the hook (`frida -f …`, spawn-gating — hooked **before** the first crypto call, not
 attached after), then walk the pairing/login flow. The identity is decrypted as part of coming
 online, written fresh under the current Keystore key, right in front of your hook.
+
+> **This step is the single point of failure for the whole chain.** Everything downstream — the
+> handshake, the REGISTER, the ring, the open — depends on one assumption: that the app decrypts
+> its identity through `javax.crypto.Cipher.doFinal` in a Java process a Frida hook can reach. That
+> holds today. It stops holding the moment the app moves the crypto out of reach: a native (NDK)
+> TLS/keystore implementation, hardware-backed `StrongBox` keys that never leave the secure
+> element, Play Integrity / attestation that refuses to run on a rooted or emulated device, or
+> plain obfuscation/anti-Frida. Any app update can introduce any of these, and then this capture
+> breaks and the rest is moot. The TLS and SIP work below is stable — it's standards. **The
+> identity extraction is the fragile hinge**, and it's worth knowing that before you build on it.
 
 ---
 

@@ -61,7 +61,7 @@ if echo "$OUT" | grep -qiE 'registration success|SIP/2.0 200'; then
   echo
   echo "    OK: REGISTER 200 — you are a registered SIP endpoint on the door."
   echo "    => the identity is complete and accepted. You can now receive the ring (section 9)"
-  echo "       and open the door with an in-dialog SIP MESSAGE (section 8)."
+  echo "       and open the door with an out-of-dialog SIP MESSAGE from this endpoint (section 8)."
   exit 0
 fi
 
