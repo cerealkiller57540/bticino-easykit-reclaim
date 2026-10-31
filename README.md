@@ -553,3 +553,25 @@ cryptography:
   night (the frame-index tuning in §9 was measured in daylight).
 
 These land as separate, documented commits.
+
+---
+
+## 11. Related work
+
+[`deddroid/bticino-easykit`](https://github.com/deddroid/bticino-easykit) is the other serious
+open-source EasyKit client, and it is worth knowing about — it takes the **opposite** route. It
+reaches the kit **through the Netatmo/BTicino cloud**: you sign in with a Netatmo "Home + Security"
+account, it reuses the official app's OAuth/Firebase client IDs, and the call's video offer arrives
+as a **Firebase push**. The media is **WebRTC** (H.264 + Opus), not SIP. It verifies live view, panel
+audio, ring notifications with a snapshot, and door/gate release — all via that cloud path.
+
+This project is the **local alternative**: no Netatmo account, no Firebase, no cloud in the loop. It
+registers directly to the door over **SIP-TLS** on the LAN using a client identity recovered from the
+app, and opens the door with a local in-dialog SIP `MESSAGE`. Where `deddroid/bticino-easykit` depends
+on the internet staying up and the cloud service staying online, this one keeps working if the WAN is
+cut.
+
+One caveat worth flagging: "EasyKit" covers more than one generation of hardware. The cloud/Firebase
+path above looks like the Wi-Fi, Netatmo-rebadged kit; the work here targets the SIP-TLS model with
+its own SIP domain. If your kit behaves differently from what either README describes, you may simply
+have the other generation.
