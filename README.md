@@ -526,6 +526,14 @@ The whole path — ring → early-media AVI → frame by index → JPEG → MQTT
 → MQTT → local SIP `MESSAGE` → relay — runs on your LAN, with the cloud never in the loop, and is
 **proven in production**.
 
+![The reclaimed door station in Home Assistant: an MQTT device exposing the gate / stairwell-light /
+gate-impulse buttons, the ring binary sensor, the on-ring camera snapshot, and an activity log of
+real commands — all local.](docs/ha-device.png)
+
+*The door station as a native MQTT device in Home Assistant — opening buttons, ring sensor, on-ring
+snapshot (blurred here), and a log of real commands. No cloud. (The camera thumbnail is deliberately
+blurred; everything else is the actual device page.)*
+
 > Why MQTT Discovery rather than a REST/template sensor: the client *pushes* on an event (a ring is
 > rare and instantaneous), retained config survives an HA restart, and the camera takes raw JPEG on
 > a topic with no extra plumbing. It is the lightest honest way to get a *pushed* image and a
