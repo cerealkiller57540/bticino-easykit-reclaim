@@ -213,8 +213,13 @@ Java with **jadx**:
 
 ```bash
 # jadx 1.5.x, with a JDK 17 on PATH
-jadx --no-res --show-bad-code -j2 -d out/ com.<vendor>.<app>.apk
+jadx --no-res --show-bad-code -j2 -d out/     com.<vendor>.<app>.apk   # Java call path
+jadx --no-src                     -d out-res/ com.<vendor>.<app>.apk   # resources (res/raw/*.rc)
 ```
+
+> `--no-res` keeps the first pass fast and small, but it also skips the one resource you need —
+> `res/raw/linphonerc` (below). The second pass (`--no-src`) pulls the resources on their own, into
+> `out-res/resources/res/raw/`. [`scripts/10-decompile.sh`](scripts/10-decompile.sh) runs both.
 
 You get a few thousand `.java` files. The class names are obfuscated (`a.java`, `b.java`,
 `C0616f.java`…), but the Linphone SDK calls are not — and those calls are the map. What reading it
@@ -342,10 +347,13 @@ stack) has to be built against *that* mbedTLS, not the system OpenSSL.
 > 4.0.0 (released 2025-10-15) removed the static-ECDH / `ECDH-ECDSA` / `ECDH-RSA` key exchanges for
 > TLS 1.2** — keeping only ephemeral ECDHE. The 3.6 **LTS** line keeps them, but its support window
 > runs only to **about March 2027**. After that, staying on the door means staying on an
-> out-of-support mbedTLS, or maintaining your own fork that re-enables the suites. The real fix
-> isn't on our side — it's the door's firmware offering a modern key exchange, which the vendor has
-> no incentive to ship. Know this going in: the cryptography that lets you reclaim the device is
-> itself on borrowed time.
+> out-of-support mbedTLS, or maintaining your own fork that re-enables the suites. And the next LTS
+> is no escape hatch: **mbedTLS 4.1 LTS (released March 2026, supported to March 2029)** carries the
+> 4.x removal forward — it still does *not* offer static ECDH. So "just wait for the next LTS" does
+> not get you a supported library that talks to this door; the gap only widens. The real fix isn't
+> on our side — it's the door's firmware offering a modern key exchange, which the vendor has no
+> incentive to ship. Know this going in: the cryptography that lets you reclaim the device is itself
+> on borrowed time.
 
 ---
 
