@@ -304,6 +304,17 @@ That single fact decides your whole toolchain:
 So the client side of this project is built on **mbedTLS 3.6.x**. Everything downstream (the SIP
 stack) has to be built against *that* mbedTLS, not the system OpenSSL.
 
+> **Longevity — plan for this dependency being legacy.** This isn't a passing version quirk, it's a
+> dead end that the whole ecosystem is walking away from. Static ECDH is deprecated by
+> [RFC 9325](https://www.rfc-editor.org/rfc/rfc9325), OpenSSL dropped it in 2016, and **mbedTLS
+> 4.0.0 (released 2025-10-15) removed the static-ECDH / `ECDH-ECDSA` / `ECDH-RSA` key exchanges for
+> TLS 1.2** — keeping only ephemeral ECDHE. The 3.6 **LTS** line keeps them, but its support window
+> runs only to **about March 2027**. After that, staying on the door means staying on an
+> out-of-support mbedTLS, or maintaining your own fork that re-enables the suites. The real fix
+> isn't on our side — it's the door's firmware offering a modern key exchange, which the vendor has
+> no incentive to ship. Know this going in: the cryptography that lets you reclaim the device is
+> itself on borrowed time.
+
 ---
 
 ## 5. Proving the handshake
@@ -359,6 +370,16 @@ The pragmatic workaround on a trusted LAN is **not to pass a CA file for server 
 (`--tls-ca-file` omitted). Without a CA to verify against, PJSIP completes the handshake instead of
 rejecting the name mismatch. On your own network, against your own device, that's an acceptable
 trade; it is *not* something to carry over to anything facing the internet.
+
+**Be honest about what this costs you.** With no CA and no server verification, you authenticate
+*to* the door but you don't authenticate the door *to you* — a device on the same LAN that can
+intercept the connection could impersonate it. "It's only the LAN" does not erase that; it narrows
+who could do it. If you want the real thing, the fix is **not** to trust the vendor's public CA by
+name (the CN won't match any name you can route to), it's to **pin the door's own server
+certificate**: capture the leaf cert the door presents (e.g. save it from the `ssl_client2` run in
+§5), trust *exactly that file*, and reject anything else. That gives you mutual authentication
+without needing a CN/SAN that matches your LAN address. Pinning is the honest endpoint here; the
+CA-less handshake is the quick start.
 
 With that in place, the registrar accepts the account:
 
