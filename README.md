@@ -608,12 +608,11 @@ The whole path — ring → early-media AVI → frame by index → JPEG → MQTT
 **proven in production**.
 
 ![The reclaimed door station in Home Assistant: an MQTT device exposing the gate / stairwell-light /
-gate-impulse buttons, the ring binary sensor, the on-ring camera snapshot, and an activity log of
-real commands — all local.](docs/ha-device.png)
+gate-impulse buttons, the live-view and answering-machine controls, the ring/photo/last-call sensors,
+and an activity log of real commands — all local.](docs/ha-device.png)
 
-*The door station as a native MQTT device in Home Assistant — opening buttons, ring sensor, on-ring
-snapshot (blurred here), and a log of real commands. No cloud. (The camera thumbnail is deliberately
-blurred; everything else is the actual device page.)*
+*The door station as a native MQTT device in Home Assistant — opening buttons, the live-view switch,
+the answering-machine toggle, ring/photo/last-call sensors, and a log of real commands. No cloud.*
 
 > Why MQTT Discovery rather than a REST/template sensor: the client *pushes* on an event (a ring is
 > rare and instantaneous), retained config survives an HA restart, and the camera takes raw JPEG on
