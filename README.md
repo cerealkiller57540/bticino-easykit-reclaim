@@ -4,10 +4,13 @@
 > end to end: the TLS client identity is recovered from the vendor app, the mutual-TLS handshake to
 > the door station succeeds, and a SIP `REGISTER` is accepted (`200 OK`) — all on the LAN, with no
 > cloud. On top of that, a background client **catches the incoming call and grabs a photo of the
-> visitor on ring** ([§9](#9-catching-the-ring-and-grabbing-a-photo)), and the gate/lock is
-> **opened locally** over the same SIP channel ([§8](#8-opening-the-door-locally)) — both running
-> and proven, both cloud-free. What is left is polish (full live media, richer event history,
-> night-time tuning); those parts are in [§10](#10-work-in-progress--where-this-is-going).
+> visitor on ring** ([§9](#9-catching-the-ring-and-grabbing-a-photo)), the gate/lock is
+> **opened locally** over the same SIP channel ([§8](#8-opening-the-door-locally)), and a **live
+> view of the entrance can be pulled on demand** by placing an outgoing call to the door station
+> itself ([§10](#10-seeing-the-entrance-on-demand--a-live-view)) — the first two running and
+> proven, the live view newly deployed and still awaiting a full end-to-end check, all cloud-free.
+> What is left after that is genuine polish (richer event history); see
+> [§11](#11-work-in-progress--where-this-is-going).
 >
 > **What this does.** This project *reads* the door station — it knows when someone rings and grabs
 > a photo of the visitor on ring — and it *drives* it: the gate/lock-release command travels over
@@ -537,10 +540,11 @@ ffmpeg -i ring.avi -vf "select='eq(n,10)'" -frames:v 1 -q:v 2 out.jpg
 ```
 
 **`10` here is an example, not a magic number** — it's the frame *I* measured as clean (~4 s after
-the `183`, once the stream has stabilised and the visitor is centred), in daylight. The right index
-depends on your own ring timing and lighting (the IR illuminator at night changes it — see §10), so
-measure yours rather than copying `10`. The method — index, not seconds — is what transfers. Verify
-the real rate yourself before trusting any timing:
+the `183`, once the stream has stabilised and the visitor is centred), in daylight, and confirmed to
+hold at night too on this unit (the IR illuminator changes the picture, not the timing, for this
+camera). The right index still depends on your own ring timing and lighting, so measure yours rather
+than copying `10`. The method — index, not seconds — is what transfers. Verify the real rate
+yourself before trusting any timing:
 
 ```bash
 ffprobe -v error -select_streams v:0 \
@@ -617,22 +621,89 @@ blurred; everything else is the actual device page.)*
 
 ---
 
-## 10. Work in progress — where this is going
+## 10. Seeing the entrance on demand — a live view
+
+Everything above is the door calling *you*. This section is the other direction: your own
+registered endpoint places an **outgoing** call to the door station, to pull a live view of the
+entrance on demand — e.g. from an HA switch, without waiting for a ring.
+
+The SDP mechanics are the same offer/answer machinery as §9 — the door answers an INVITE's media
+offer the same way whether it's calling you or being called — but getting the video to actually
+*arrive and decode* turned up a subtlety worth documenting on its own, because the obvious
+diagnosis is wrong.
+
+### The naive theory, and why it's wrong
+
+The first hypothesis was: "the door only sends video if you offer `sendrecv`; offer `recvonly` and
+it stays quiet." That's **false**, and `tcpdump` on the call itself is what disproves it: with a
+`recvonly` offer, the door answers and **does send video — hundreds of RTP packets**, captured on
+the wire. So the door isn't the problem. The video that never showed up was being lost **after**
+capture, entirely on the local side, for two independent reasons:
+
+1. **A stateful firewall never opened a return path.** The local box runs a default-drop stateful
+   firewall (nftables/iptables-style). Offering `recvonly` means the local endpoint never
+   *transmits* from its video port — so no outbound packet ever creates a connection-tracking
+   entry for that flow. The door's inbound RTP arrives at the right port but matches no tracked
+   connection, and the stateful ruleset drops it **silently, with no ICMP, no log**. `tcpdump`
+   still shows the packets, because it captures before netfilter — which is exactly what makes
+   this easy to misdiagnose as "the device isn't sending anything" when the opposite is true.
+2. **A software hold guard, independent of the firewall.** Even with the drop fixed, the
+   SIP/media stack used here (pjsua) derives its *call media state* purely from the **negotiated
+   direction**: a `recvonly` offer is treated as placing the far end on hold, so the call state
+   never reaches `ACTIVE` — and a guard in the app layer refuses to connect the video recorder to
+   any stream that isn't `ACTIVE`. Packets could be flowing perfectly and the recorder would still
+   write an empty file, because the state machine, not the network, is gating it.
+
+### The fix: offer `sendrecv`, not `recvonly`
+
+Offering **`sendrecv`** instead resolves both problems in one move, for reasons that are really
+about the local stack rather than the door: transmitting even a minimal video stream from the
+local endpoint is enough to open a connection-tracking entry for the return traffic, and a
+negotiated `sendrecv` reliably drove the call state to `ACTIVE`, unblocking the recorder guard.
+Measured on the bench with the real device: with `recvonly`, the output file stayed at a few
+hundred bytes; with `sendrecv`, the same call produced a multi-megabyte, correctly decoded clip
+within seconds.
+
+Two fixes were possible once the firewall drop was identified — add a permanent accept rule for
+the video flow, or simply stop triggering the drop by offering `sendrecv`. The permanent firewall
+rule was rejected: it would apply to *every* call, including the already-proven incoming-ring path
+(§9), for a risk that isn't worth taking on a path that already works. Offering `sendrecv` only on
+the outgoing "see the entrance" call keeps the fix scoped to the new feature and touches neither
+the firewall policy nor the ring path.
+
+### How it's wired up
+
+An outgoing call is placed from the same registered endpoint used throughout this project (§6),
+targeting the door station's own SIP URI, with a `sendrecv` video offer in the INVITE. Home
+Assistant exposes this as a simple switch over MQTT (same Discovery pattern as §9): turning it on
+places the call and starts recording; turning it off tears the call down. No real SIP URI, device
+address, or SDP attribute is published here — see §7 for why.
+
+### Status
+
+This is **deployed**, not yet exercised end to end: the outgoing-call binary and the HA switch are
+live, and the `sendrecv` fix is confirmed on the bench (video decodes, the clip is correctly
+sized). What hasn't happened yet is a live, real-world run of the whole chain — switch press →
+call → decoded stream → viewable camera in HA — which is the next session's work, not a past
+result to report here.
+
+---
+
+## 11. Work in progress — where this is going
 
 The hard parts are done and proven: identity extraction, the static-ECDH TLS wall, local
-registration, **photo on ring (§9)**, and **local door opening (§8)**. What remains is polish, not
-cryptography:
+registration, **photo on ring (§9)**, **local door opening (§8)**, and **on-demand live view
+(§10)**. What remains is polish, not cryptography:
 
-- **Full live media**, not just a snapshot — negotiate the INVITE's SDP for a continuous view.
 - **Richer event history** — log every INVITE and its outcome for a who-rang-when record.
-- **Night-time robustness** — confirm the on-ring photo timing holds with the IR illuminator at
-  night (the frame-index tuning in §9 was measured in daylight).
+- **A dashboard card** around the live view (§10) — a static preview image plus a toggle, wired to
+  the switch, instead of driving it from Developer Tools.
 
 These land as separate, documented commits.
 
 ---
 
-## 11. Related work
+## 12. Related work
 
 [`deddroid/bticino-easykit`](https://github.com/deddroid/bticino-easykit) is the other serious
 open-source EasyKit client, and it is worth knowing about — it takes the **opposite** route. It
