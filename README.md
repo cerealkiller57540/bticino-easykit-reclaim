@@ -5,11 +5,12 @@
 > the door station succeeds, and a SIP `REGISTER` is accepted (`200 OK`) — all on the LAN, with no
 > cloud. On top of that, a background client **catches the incoming call and grabs a photo of the
 > visitor on ring** ([§9](#9-catching-the-ring-and-grabbing-a-photo)), the gate/lock is
-> **opened locally** over the same SIP channel ([§8](#8-opening-the-door-locally)), and a **live
+> **opened locally** over the same SIP channel ([§8](#8-opening-the-door-locally)), the client can
+> **answer and record a message** from the visitor instead of only photographing them, and a **live
 > view of the entrance can be pulled on demand** by placing an outgoing call to the door station
-> itself ([§10](#10-seeing-the-entrance-on-demand--a-live-view)) — the first two running and
-> proven, the live view newly deployed and still awaiting a full end-to-end check, all cloud-free.
-> What is left after that is genuine polish (richer event history); see
+> itself ([§10](#10-seeing-the-entrance-on-demand--a-live-view)) — photo, open and answer-and-record
+> running and proven, the live view newly deployed and still awaiting a full end-to-end check, all
+> cloud-free. What is left after that is polish on all of these; see
 > [§11](#11-work-in-progress--where-this-is-going).
 >
 > **What this does.** This project *reads* the door station — it knows when someone rings and grabs
@@ -693,7 +694,30 @@ result to report here.
 
 The hard parts are done and proven: identity extraction, the static-ECDH TLS wall, local
 registration, **photo on ring (§9)**, **local door opening (§8)**, and **on-demand live view
-(§10)**. What remains is polish, not cryptography:
+(§10)**. What's below is actually in flight — proven in the parts that matter most, still rough
+around the edges — plus the smaller items that are just polish.
+
+### Answering machine — proven, not yet hardened
+
+Instead of only grabbing a photo on ring (§9), the same registered endpoint can **answer** the
+call: accept the `INVITE` instead of just recording the early-media, play back a short announcement,
+record whatever the visitor says, then hang up and ship the recording out (e.g. as a voice message).
+The call-control side of this — answer, play an announcement, record a separate file per call,
+hang up — is the same `pjsua` client used throughout this project, just driven a step further than
+the record-only path in §9.
+
+This is **proven**: a real test at the door, visitor speaking, audio both ways confirmed clean
+(no packet loss on either leg), announcement played correctly, the recorded message captured and
+delivered — all on one call, end to end. What's still rough:
+
+- **No transcription** — the message ships as audio, by design, not because speech-to-text would
+  be hard to bolt on. Doing that well is future work.
+- **Audio levels and filtering** are still being tuned call to call; the announcement and the
+  recording both needed hand-tuned gain/EQ to sound right, and that tuning isn't finished.
+- **Gating on presence** (only answer when nobody is home) is currently automation glue outside
+  this client, not something the client itself decides.
+
+### Smaller remaining items
 
 - **Richer event history** — log every INVITE and its outcome for a who-rang-when record.
 - **A dashboard card** around the live view (§10) — a static preview image plus a toggle, wired to
