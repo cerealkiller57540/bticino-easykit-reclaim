@@ -47,7 +47,7 @@ def _load_site():
         with open(path) as f:
             return json.load(f)
     except (OSError, ValueError) as e:
-        sys.exit("FATAL : config du site illisible (%s) : %s" % (path or "BTCK_SITE vide", e))
+        sys.exit("FATAL: cannot read site config (%s): %s" % (path or "BTCK_SITE empty", e))
 
 
 SITE = _load_site()
@@ -205,20 +205,20 @@ def setup_devaddr_env():
     OUTGOING offer (live). Failure is not fatal: live view is unavailable, the rest works."""
     cred = os.environ.get("CREDENTIALS_DIRECTORY")
     if not cred:
-        log("live: CREDENTIALS_DIRECTORY absent -> live indisponible (ring/photo OK)")
+        log("live: no CREDENTIALS_DIRECTORY -> live unavailable (ring/photo OK)")
         return False
     path = os.path.join(cred, "devaddr")
     try:
         with open(path) as fh:
             val = fh.read().strip()
     except OSError as e:
-        log(f"live: lecture cred devaddr KO -> live indisponible ({e})")
+        log(f"live: cannot read devaddr credential -> live unavailable ({e})")
         return False
     if not _UUID_RE.fullmatch(val):
-        log(f"live: cred devaddr n'est pas un UUID ({len(val)} car.) -> live indisponible")
+        log(f"live: devaddr credential is not a UUID ({len(val)} chars) -> live unavailable")
         return False
     os.environ["BTCK_DEVADDR"] = val
-    log("live: deviceAddr platine charge (<UUID>) -> appel sortant arme")
+    log("live: door station deviceAddr loaded (<UUID>) -> outgoing call armed")
     return True
 
 
@@ -273,7 +273,7 @@ def load_vault():
         all_blocks=True,
     )
     if not key or not crt:
-        log("FATAL : cle ou cert introuvable dans les notes du coffre")
+        log("FATAL: key or certificate not found in the vault notes")
         sys.exit(1)
     mqtt_raw = json.loads(rbw("get", "--raw", VAULT_MQTT))["data"]
     return sip_pw, key, crt, mqtt_raw["username"], mqtt_raw["password"]
@@ -288,16 +288,16 @@ def _resolve_pjsua():
             h = hashlib.sha256(fh.read()).hexdigest()[:16]
         if h == PJSUA_SHA16:
             CAPTURE_ON = True
-            log(f"pjsua patche OK (sha {h}) -> capture photo active")
+            log(f"patched pjsua OK (sha {h}) -> photo capture enabled")
             try:  # ffmpeg extracts the JPEG; missing = no photo
                 subprocess.run([FFMPEG, "-version"], capture_output=True, timeout=5)
-                log("ffmpeg present (extraction JPEG OK)")
+                log("ffmpeg found (JPEG extraction OK)")
             except (OSError, subprocess.SubprocessError):
-                log(f"ATTENTION ffmpeg absent/KO ({FFMPEG}) -> aucune photo ne sera produite")
+                log(f"WARNING ffmpeg missing/broken ({FFMPEG}) -> no photo will be produced")
             return
-        log(f"ATTENTION sha pjsua={h} != {PJSUA_SHA16} -> repli SANS capture")
+        log(f"WARNING pjsua sha={h} != {PJSUA_SHA16} -> fallback WITHOUT capture")
     except OSError as e:
-        log(f"ATTENTION binaire patche absent ({e}) -> repli SANS capture")
+        log(f"WARNING patched binary missing ({e}) -> fallback WITHOUT capture")
     PJSUA = PJSUA_FALLBACK
     CAPTURE_ON = False
 
@@ -312,7 +312,7 @@ def prepare_runtime():
         key_file = os.path.join(cred, "sip.key")
         crt_file = os.path.join(cred, "sip.crt")
         if not (os.path.exists(key_file) and os.path.exists(crt_file)):
-            log("FATAL : credential sip.key/sip.crt absent")
+            log("FATAL: credential sip.key/sip.crt missing")
             sys.exit(1)
         with open(os.path.join(cred, "sip.pw")) as fh:
             sip_pw = fh.read().strip()
@@ -321,7 +321,7 @@ def prepare_runtime():
         with open(os.path.join(cred, "mqtt.pw")) as fh:
             mqtt_pw = fh.read().strip()
     else:
-        log("secrets: rbw (coffre)")
+        log("secrets: rbw (vault)")
         sip_pw, key, crt, mqtt_user, mqtt_pw = load_vault()
         key_file = os.path.join(RUN_DIR, "client.key")
         crt_file = os.path.join(RUN_DIR, "client.crt")
@@ -460,7 +460,7 @@ def publish_call(cli, ring_wall, dur, reason):
         "debut": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ring_wall)),
     }
     cli.publish(T_CALL, json.dumps(payload), qos=1, retain=True)
-    log(f"appel: {issue} ({methode}, {dur:.1f} s, raison={reason or '-'})")
+    log(f"call: {issue} ({methode}, {dur:.1f} s, reason={reason or '-'})")
 
 
 def publish_buttons(cli):
@@ -517,13 +517,13 @@ def _resolve_repondeur():
         finally:
             w.close()
     except Exception as e:  # noqa: BLE001
-        log(f"repondeur: annonce illisible ({e}) -> repondeur indisponible")
+        log(f"answering machine: unreadable greeting ({e}) -> unavailable")
         return
     if fmt != (16000, 1, 2):
-        log(f"repondeur: annonce format {fmt} != 16k/mono/s16 -> indisponible")
+        log(f"answering machine: greeting format {fmt} != 16k/mono/s16 -> unavailable")
         return
     REP_OPTS = [f"--play-file {REP_PLAY}", f"--rec-file {REP_REC}"]
-    log(f"repondeur: annonce {REP_PLAY_S:.2f} s")
+    log(f"answering machine: greeting {REP_PLAY_S:.2f} s")
 
 
 def publish_repondeur_switch(cli):
@@ -558,7 +558,7 @@ def publish_call_rep(cli, ring_wall, dur):
         "debut": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ring_wall)),
     }
     cli.publish(T_CALL, json.dumps(payload), qos=1, retain=True)
-    log(f"appel: repondu_poste (repondeur, {dur:.1f} s)")
+    log(f"call: repondu_poste (answering machine, {dur:.1f} s)")
 
 
 def rep_worker(cli, q):
@@ -577,7 +577,7 @@ def rep_worker(cli, q):
             raw = raw[: len(raw) - (len(raw) % 2)]
             secs = len(raw) / 32000.0
             if secs < 1.0:
-                log(f"repondeur: message trop court ({secs:.1f} s) -> rien")
+                log(f"answering machine: message too short ({secs:.1f} s) -> dropped")
                 continue
             r = subprocess.run(
                 [FFMPEG, "-nostdin", "-v", "error",
@@ -586,7 +586,7 @@ def rep_worker(cli, q):
                  "-f", "ogg", "pipe:1"],
                 input=raw, capture_output=True, timeout=60)
             if r.returncode != 0 or not r.stdout:
-                log(f"repondeur: ffmpeg rc={r.returncode} {r.stderr[:200]!r}")
+                log(f"answering machine: ffmpeg rc={r.returncode} {r.stderr[:200]!r}")
                 continue
             payload = {
                 "ogg_b64": base64.b64encode(r.stdout).decode("ascii"),
@@ -594,9 +594,9 @@ def rep_worker(cli, q):
                 "debut": time.strftime("%Y-%m-%dT%H:%M:%S%z", time.localtime(ring_wall)),
             }
             cli.publish(T_REP_MSG, json.dumps(payload), qos=1, retain=False)
-            log(f"repondeur: message publie ({secs:.1f} s, {len(r.stdout)} o ogg)")
+            log(f"answering machine: message published ({secs:.1f} s, {len(r.stdout)} B ogg)")
         except Exception as e:  # noqa: BLE001 - one lost message does not kill the thread
-            log(f"repondeur: erreur message: {e}")
+            log(f"answering machine: message error: {e}")
 
 
 def _sd_notify(msg):
@@ -634,7 +634,7 @@ def send_open(state, target):
     Reproduces JsonRpcKotlin(Action.Lock|Stairlight, deviceAddr).toString()."""
     dev = OPEN_TARGETS.get(target)
     if not dev:
-        log(f"cmd ouverture inconnue: {target!r}")
+        log(f"unknown open command: {target!r}")
         return
     light = (target == "lumiere")
     # door lock = 10 s, gate/light = 3 s: anti-duplicate window.
@@ -643,7 +643,7 @@ def send_open(state, target):
     with state.lock:
         last = state.last_cmd.get(target, 0.0)
         if now - last < guard:
-            log(f"cmd {target} ignoree (anti-rebond {guard:.0f}s)")
+            log(f"cmd {target} ignored (debounce {guard:.0f}s)")
             return
         state.last_cmd[target] = now
     payload = {
@@ -658,12 +658,12 @@ def send_open(state, target):
     with state.lock:
         proc = state.proc
     if proc is None or proc.poll() is not None:
-        log("cmd ouverture : pjsua absent -> ignoree")
+        log("open command: pjsua not running -> ignored")
         return
     with state.stdin_lock:
         proc.stdin.write(line)
         proc.stdin.flush()
-    log(f"MESSAGE {'light' if light else 'lock'}.setStatus envoye (cible={target})")
+    log(f"MESSAGE {'light' if light else 'lock'}.setStatus sent (target={target})")
 
 
 def publish_live_switch(cli):
@@ -698,7 +698,7 @@ def live_start(cli, state):
         if now - state.live_last < 2.0:      # toggle debounce
             return
         if state.live_on or state.live_alive:
-            log("live: deja actif -> ignore")
+            log("live: already active -> ignored")
             return
         # A missed DISCONNECTED would leave a ghost id that refuses live forever.
         for cid in [c for c, t in state.calls.items() if now - t > CALL_STALE_S]:
@@ -706,14 +706,14 @@ def live_start(cli, state):
         if state.live_call is not None and state.live_call not in state.calls:
             state.live_call = None
         if state.calls or state.live_call is not None:
-            log("live: un appel est en cours -> refuse (le ring doit rester joignable)")
+            log("live: a call is in progress -> refused (the doorbell must stay reachable)")
             cli.publish(T_LIVE_STATE, "OFF", qos=1, retain=True)
             return
         state.live_last = now
         state.live_on = True
         state.live_alive = True
     if proc is None or proc.poll() is not None:
-        log("live: pjsua absent -> annule")
+        log("live: pjsua not running -> cancelled")
         with state.lock:
             state.live_on = state.live_alive = False
         cli.publish(T_LIVE_STATE, "OFF", qos=1, retain=True)
@@ -723,7 +723,7 @@ def live_start(cli, state):
         proc.stdin.write("m" + nl + SIP_DIY + nl)
         proc.stdin.flush()
     cli.publish(T_LIVE_STATE, "ON", qos=1, retain=True)
-    log("live: appel sortant 'voir le hall' lance")
+    log("live: outgoing 'view entrance' call started")
     # Hard cap: if nothing closes the live (no DISCONNECTED seen), hang up.
     cap = threading.Timer(LIVE_MAX_S, live_stop, args=(cli, state, "plafond"))
     cap.daemon = True
@@ -759,9 +759,9 @@ def live_stop(cli, state, why="demande"):
                 proc.stdin.write("h" + chr(10))
                 proc.stdin.flush()
     if alive and bound:
-        log(f"live: raccroche ({why})")
+        log(f"live: hung up ({why})")
     elif alive:
-        log(f"live: appel non lie -> pas de 'h' ({why})")
+        log(f"live: call not bound -> no 'h' ({why})")
     cli.publish(T_LIVE_STATE, "OFF", qos=1, retain=True)
 
 
@@ -781,11 +781,11 @@ def jpeg_worker(cli, q):
                 # NON-retained event triggers the automation (no replay when HA reboots).
                 cli.publish(T_PHOTO, jpg, qos=1, retain=True)
                 cli.publish(T_PHOTO_EVT, os.path.basename(path), qos=1, retain=False)
-                log(f"photo publiee ({len(jpg)} o b64) depuis {os.path.basename(path)}")
+                log(f"photo published ({len(jpg)} B b64) from {os.path.basename(path)}")
             else:
-                log(f"photo: aucune frame extraite de {os.path.basename(path)}")
+                log(f"photo: no frame extracted from {os.path.basename(path)}")
         except Exception as e:  # noqa: BLE001 - a broken AVI does not kill the thread
-            log(f"photo: erreur extraction {os.path.basename(path)}: {e}")
+            log(f"photo: extraction error {os.path.basename(path)}: {e}")
         finally:
             try:
                 if DEBUG_KEEP:
@@ -802,11 +802,11 @@ def jpeg_worker(cli, q):
                             os.unlink(old)
                         except OSError:
                             pass
-                    log("DEBUG_KEEP: AVI -> %s (garde %d)" % (DEBUG_DIR, DEBUG_KEEP_N))
+                    log("DEBUG_KEEP: AVI -> %s (keep %d)" % (DEBUG_DIR, DEBUG_KEEP_N))
                 else:
                     os.unlink(path)
             except OSError as e:
-                log(f"photo: AVI non deplace/supprime ({e}) -> unlink")
+                log(f"photo: AVI not moved/removed ({e}) -> unlink")
                 try:
                     os.unlink(path)
                 except OSError:
@@ -839,7 +839,7 @@ def _extract_jpeg(path):
                 capture_output=True, timeout=15,
             )
             if r.returncode == 0 and r.stdout:
-                log("photo: branche=%s (%d o jpeg)" % (tag, len(r.stdout)))
+                log("photo: branch=%s (%d B jpeg)" % (tag, len(r.stdout)))
                 return base64.b64encode(r.stdout)
         except subprocess.TimeoutExpired:
             log("photo: ffmpeg timeout (15 s)")
@@ -866,7 +866,7 @@ def main():
     def on_connect(client, userdata, flags, rc, properties=None):
         # Replayed on EVERY (re)connection: otherwise the retained "offline" LWT keeps
         # the entity "unavailable" after any broker restart / NIC failover.
-        log(f"MQTT (re)connecte (rc={rc})")
+        log(f"MQTT (re)connected (rc={rc})")
         publish_discovery(client)
         publish_buttons(client)
         publish_call_sensor(client)
@@ -908,17 +908,17 @@ def main():
             return
         if msg.topic == T_REP_SET:
             if msg.retain or val not in ("ON", "OFF"):
-                log("repondeur: commande ignoree (retain ou valeur inconnue)")
+                log("answering machine: command ignored (retained or unknown value)")
                 return
             with state.lock:
                 rep["on"] = (val == "ON")
                 rep["seen"] = True
             _c.publish(T_REP_STATE, val, qos=1, retain=True)
-            log(f"repondeur: {val}")
+            log(f"answering machine: {val}")
             return
         if msg.topic == T_LIVE_SET:
             if msg.retain or val not in ("ON", "OFF"):
-                log("live: commande ignoree (retain ou valeur inconnue)")
+                log("live: command ignored (retained or unknown value)")
                 return
             if val == "ON":
                 live_start(_c, state)
@@ -928,7 +928,7 @@ def main():
         if msg.topic != T_CMD:
             return
         if msg.retain:
-            log("cmd ignoree (retain -> anti-rejeu)")
+            log("cmd ignored (retained -> replay guard)")
             return
         send_open(state, val)
 
@@ -996,15 +996,15 @@ def main():
             stale = interval + 300.0
             if not ever:
                 if now - started > STARTUP_GRACE:
-                    log("watchdog: jamais enregistre -> sortie (systemd relancera)")
+                    log("watchdog: never registered -> exit (systemd will restart)")
                     _fail_exit(cli, proc)
             elif last is not None and now - last > stale:
-                log("watchdog: enregistrement perime -> sortie (systemd relancera)")
+                log("watchdog: registration expired -> exit (systemd will restart)")
                 _fail_exit(cli, proc)
 
     threading.Thread(target=watchdog, daemon=True).start()
 
-    log(f"pjsua lance (pid {proc.pid}), en ecoute d'INVITE")
+    log(f"pjsua started (pid {proc.pid}), listening for INVITE")
     last_ring = 0.0
     ring_t = None        # monotonic of the current ring (None = no call)
     ring_wall = 0.0
@@ -1028,7 +1028,7 @@ def main():
             if len(avi_wait["done"]) > 16:   # memory bound: set of handled paths
                 avi_wait["done"] = set(list(avi_wait["done"])[-8:])
         if live:
-            log(f"live: AVI du hall ignore (pas de photo) {os.path.basename(path)}")
+            log(f"live: entrance AVI skipped (no photo) {os.path.basename(path)}")
             try:
                 os.unlink(path)
             except OSError:
@@ -1037,7 +1037,7 @@ def main():
         try:
             photo_q.put_nowait(path)
         except queue.Full:
-            log("photo: file pleine -> AVI jete")
+            log("photo: queue full -> AVI dropped")
             try:
                 os.unlink(path)
             except OSError:
@@ -1071,9 +1071,9 @@ def main():
         for _ in range(3):
             time.sleep(3)
             if rep_rest():
-                log(f"repondeur: pret ({len(rep['rest'])} ports au repos)")
+                log(f"answering machine: ready ({len(rep['rest'])} idle ports)")
                 return
-        log("repondeur: lecteur/enregistreur introuvables -> desarme")
+        log("answering machine: player/recorder not found -> disarmed")
 
     def rep_rest():
         # slots recorded while idle; a call port left open ends up there and
@@ -1107,7 +1107,7 @@ def main():
         if not go:
             return
         try:
-            log("repondeur: decroche (200)")
+            log("answering machine: answered (200)")
             time.sleep(2.0)
             ports = rep_conf_list()
             with state.lock:
@@ -1115,13 +1115,13 @@ def main():
                 play, rec = rep["play"], rep["rec"]
             new = [p for p, _ in ports if p not in known]
             if len(new) != 1:
-                log(f"repondeur: slot d'appel introuvable ({len(new)}) -> raccroche")
+                log(f"answering machine: call slot not found ({len(new)}) -> hang up")
                 rep_send("h")
                 return
             call = new[0]
             rep_send(f"cc {play} {call}")
             if REP_DIAG:
-                log(f"diag: cc {play} {call} (connus {known})")
+                log(f"diag: cc {play} {call} (known {known})")
                 time.sleep(1.0)
                 rep_send("cl")
                 time.sleep(4.0)
@@ -1132,7 +1132,7 @@ def main():
             rep_send(f"cd {play} {call}")
             start = os.path.getsize(REP_REC) + REP_SKIP_B
             rep_send(f"cc {call} {rec}")
-            log("repondeur: annonce jouee -> enregistrement")
+            log("answering machine: greeting played -> recording")
             if REP_DIAG:
                 time.sleep(1.0)
                 rep_send("cl")
@@ -1149,9 +1149,9 @@ def main():
             try:
                 rep_q.put_nowait((start, end, ring_wall))
             except queue.Full:
-                log("repondeur: file pleine -> message perdu")
+                log("answering machine: queue full -> message lost")
         except Exception as e:  # noqa: BLE001
-            log(f"repondeur: erreur appel: {e}")
+            log(f"answering machine: call error: {e}")
             try:
                 rep_send("h")
             except Exception:
@@ -1159,7 +1159,7 @@ def main():
         finally:
             time.sleep(3.0)
             if not rep_rest():
-                log("repondeur: releve des ports au repos KO (ancien releve garde)")
+                log("answering machine: idle port scan failed (previous scan kept)")
             with state.lock:
                 rep["busy"] = False
             try:
@@ -1167,7 +1167,7 @@ def main():
             except OSError:
                 big = False
             if big:
-                log("repondeur: fichier d'enregistrement plein -> sortie au repos")
+                log("answering machine: recording file full -> back to idle")
                 time.sleep(30)   # let the worker publish the last message
                 cleanup()
 
@@ -1202,7 +1202,7 @@ def main():
                         state.live_on = False
                 if was_live:
                     cli.publish(T_LIVE_STATE, "OFF", qos=1, retain=True)
-                    log("live: appel termine (DISCONNECTED)")
+                    log("live: call ended (DISCONNECTED)")
                 # Resolve the pending AVI if it belongs to the call that just ended.
                 if pending_avi is not None:
                     pending_avi[1].cancel()   # the 2 s safety net is no longer needed
@@ -1247,7 +1247,7 @@ def main():
                     ring_t = now
                     ring_wall = time.time()
                     cli.publish(T_STATE, "ring", qos=1)
-                    log("RING detecte -> publie 'ring'")
+                    log("RING detected -> published 'ring'")
                     with state.lock:
                         rep['ring'] += 1
                         rep['cancel'] = False
@@ -1273,19 +1273,19 @@ def main():
                     state.ever = True
                     shown = state.reg_interval
                 publish_availability(cli, state)
-                log(f"REGISTER 200 (poste enregistre, re-register ~{int(shown)}s)")
+                log(f"REGISTER 200 (registered, re-register ~{int(shown)}s)")
             elif REG_FAIL_RE.search(line):
                 with state.lock:
                     state.registered = False
                 publish_availability(cli, state)
-                log("REGISTER en echec -> availability offline")
+                log("REGISTER failed -> availability offline")
             elif CAPTURE_ON and BTCK_AVI_RE.match(line):
                 m = BTCK_AVI_RE.match(line)
                 kind, path = m.group(1), m.group(2)
                 # lock 2: path INSIDE RUN_DIR + name rx_<epoch>_<seq>.avi
                 d, b = os.path.dirname(path), os.path.basename(path)
                 if d != RUN_DIR or not BTCK_NAME_RE.match(b):
-                    log(f"BTCK ignore (chemin hors RUN_DIR): {b}")
+                    log(f"BTCK ignored (path outside RUN_DIR): {b}")
                 elif kind == "START":
                     last_start = path   # lock 3: remember the last START
                 elif kind == "DONE":
@@ -1310,7 +1310,7 @@ def main():
                     else:
                         # lock 2 already passed => the file is ours: delete it
                         # anyway (otherwise it leaks into the tmpfs if DONE/START cross).
-                        log(f"BTCK DONE sans START correspondant, unlink: {b}")
+                        log(f"BTCK DONE without matching START, unlink: {b}")
                         try:
                             os.unlink(path)
                         except OSError:
@@ -1324,7 +1324,7 @@ def main():
         except Exception:
             pass
 
-    log("pjsua s'est termine -> sortie (systemd relancera)")
+    log("pjsua exited -> exit (systemd will restart)")
     cleanup()
 
 

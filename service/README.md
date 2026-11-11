@@ -24,10 +24,11 @@ pjproject, and seen your own `REGISTER` get a `200 OK`.
 All entities are created by MQTT Discovery under `homeassistant/...`. The open buttons come from
 the keys of `open_targets`, one button per key.
 
-Topic names, the `open_targets` keys (`gache` = door lock, `portail` = gate, `lumiere` = light),
-the JSON field names and the log messages are in French. The code and comments are in English.
-These names were left as they are on purpose, so that the published files stay identical to the
-deployed ones. Rename them if you like.
+Topic names, the `open_targets` keys (`gache` = door lock, `portail` = gate, `lumiere` = light)
+and the JSON field names are in French. The code, comments and log messages are in English.
+These names were left as they are on purpose: the author's Home Assistant entities and
+automations depend on them, and the published files stay identical to the deployed ones. Rename
+them if you like.
 
 ## Files
 
@@ -138,7 +139,7 @@ sudo cp -r systemd/bticino-doorbell.service.d /etc/systemd/system/
 # replace <user> in the copies, then:
 sudo systemctl daemon-reload
 sudo systemctl enable --now bticino-doorbell.service bticino-live.service
-journalctl -u bticino-doorbell -f    # expect a 200 REGISTER, then "pjsua patche OK"
+journalctl -u bticino-doorbell -f    # expect "patched pjsua OK", then "REGISTER 200"
 ```
 
 ### 6. The greeting

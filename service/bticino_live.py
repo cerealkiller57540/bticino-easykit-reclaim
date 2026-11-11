@@ -83,19 +83,19 @@ def stream(path):
     try:
         f = open(path, "rb", buffering=0)
     except OSError as e:
-        log("ouverture impossible : %s" % e)
+        log("cannot open: %s" % e)
         return
     try:
         proc = subprocess.Popen(FFMPEG, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE)
     except OSError as e:
-        log("ffmpeg introuvable/injoignable : %s" % e)
+        log("ffmpeg not found/unreachable: %s" % e)
         return
     err = []
     t = threading.Thread(target=lambda: err.extend(proc.stderr.read().decode(errors="replace").splitlines()[-3:]),
                          daemon=True)
     t.start()
-    log("live demarre : " + os.path.basename(path))
+    log("live started: " + os.path.basename(path))
     try:
         reason = pump(f, proc, t0)
     finally:
@@ -114,7 +114,7 @@ def stream(path):
                 proc.kill()
                 proc.wait()
     t.join(timeout=1)
-    log("live arrete (%s) apres %.1f s" % (reason, time.monotonic() - t0))
+    log("live stopped (%s) after %.1f s" % (reason, time.monotonic() - t0))
     for line in err:
         if "Invalid buffer size" not in line and "Error submitting packet" not in line:
             log("ffmpeg: " + line[:200])
@@ -125,7 +125,7 @@ def main():
     # they are not streamed, unless still empty (recorder armed for the next call).
     done = set(n for n in candidates()
                if os.path.getsize(os.path.join(RUN_DIR, n)) > 0)
-    log("surveillance de %s (%d ignores)" % (RUN_DIR, len(done)))
+    log("watching %s (%d skipped)" % (RUN_DIR, len(done)))
     while True:
         for n in sorted(candidates()):
             if n in done:
