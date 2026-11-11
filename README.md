@@ -798,3 +798,7 @@ One caveat worth flagging: "EasyKit" covers more than one generation of hardware
 path above looks like the Wi-Fi, Netatmo-rebadged kit; the work here targets the SIP-TLS model with
 its own SIP domain. If your kit behaves differently from what either README describes, you may simply
 have the other generation.
+
+## License
+
+The text of this write-up is released under the [MIT License](LICENSE).
