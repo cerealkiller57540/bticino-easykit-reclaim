@@ -679,13 +679,49 @@ Assistant exposes this as a simple switch over MQTT (same Discovery pattern as �
 places the call and starts recording; turning it off tears the call down. No real SIP URI, device
 address, or SDP attribute is published here — see §7 for why.
 
+### Getting the call into Home Assistant as a camera
+
+The recorder writes one AVI per call, and that file **grows while the call is up**. A small
+companion service tails it, pipes it into `ffmpeg`, and republishes it as RTSP to a local relay
+(go2rtc, with an empty stream that only exists while something publishes). HA sees a plain
+`generic` camera pointed at that relay. Nothing else is needed on the HA side.
+
+- **Sound.** The recorder can write the call's audio track (16 kHz mono PCM) into the same AVI;
+  `ffmpeg` encodes it to AAC next to the video. You hear the entrance, not just see it.
+- **The door hangs up after about a minute.** An outgoing call to the door station is cut by the
+  device itself after ~63 s (measured, repeatable). That's the device's limit, not a bug to fix;
+  the HA switch simply follows the real end of the call.
+- **A dashboard card that only exists during the call.** Outside a call the stream does not
+  exist, so any card that keeps polling it fills the HA log with 404 / timeout / EOF errors. A
+  card with a `visibility` condition on the live switch is *removed from the page* while hidden,
+  so it makes no requests at all. That's cleaner than filtering the log, which would also hide a
+  real failure.
+
+### Gotcha — mixed timestamps make HA drop the video
+
+The input is a pipe fed in bursts, so the video is stamped with `-use_wallclock_as_timestamps 1`.
+The first audio attempt used `aresample=async=1:first_pts=0`, which restarts the **audio** clock
+at zero while the video sits at wall-clock time. That leaves the two tracks hours apart. Players
+cope, but HA's `stream` worker remuxes to MP4, and the remux silently **drops the video**. The
+symptom in the HA log is `Error muxing first keyframe (Invalid argument)`.
+
+The fix is to keep both tracks on the same wall-clock base and let the resampler absorb the burst
+jitter:
+
+```text
+-map 0:v:0 -map 0:a:0? -af aresample=async=1:min_hard_comp=0.5 -c:a aac -ar 16000 -ac 1
+```
+
+On the bench, this was the only variant that gave aligned tracks, no audio gaps, and an MP4 remux
+that kept both tracks. `async=1` alone left ~0.1 s gaps. The trailing `?` means a silent AVI
+doesn't fail the pipeline. What you lose is the backlog read in one go at startup, which is the
+right trade-off for a live view.
+
 ### Status
 
-This is **deployed**, not yet exercised end to end: the outgoing-call binary and the HA switch are
-live, and the `sendrecv` fix is confirmed on the bench (video decodes, the clip is correctly
-sized). What hasn't happened yet is a live, real-world run of the whole chain — switch press →
-call → decoded stream → viewable camera in HA — which is the next session's work, not a past
-result to report here.
+**Proven end to end** on the real device: switch press → outgoing call → growing AVI → RTSP relay
+→ camera in HA, with the entrance audible (wind and street noise, the same as on the indoor
+monitor).
 
 ---
 
@@ -714,13 +750,29 @@ delivered — all on one call, end to end. What's still rough:
 - **Audio levels and filtering** are still being tuned call to call; the announcement and the
   recording both needed hand-tuned gain/EQ to sound right, and that tuning isn't finished.
 - **Gating on presence** (only answer when nobody is home) is currently automation glue outside
-  this client, not something the client itself decides.
+  this client, not something the client itself decides. One trap: phone geolocation produces
+  short `not_home` blips of a few seconds while you're at home. If the automation reacts to every
+  return to `home`, it keeps switching the answering machine off behind your back. Only act when
+  the previous `not_home` state lasted long enough to be real (a few minutes).
+
+### Hardening the client
+
+The client is one long-running process juggling the SIP stack, MQTT, the live view and the
+answering machine, so a review focused on what could wedge it:
+
+- **One lock order everywhere.** Two code paths took the same two locks in opposite order, a
+  rare deadlock that would leave the service frozen with no restart. Every path now takes them
+  in the same order.
+- **A systemd watchdog.** `WatchdogSec=` is set and the client pings it only after acquiring its
+  state lock, so a frozen client really is restarted.
+- **MQTT broker absent at boot isn't fatal.** The client connects asynchronously and retries,
+  instead of crashing when the broker comes up after it.
+- **No ghost calls.** Call records are timestamped, and stale ones are purged before a new live
+  view starts.
 
 ### Smaller remaining items
 
 - **Richer event history** — log every INVITE and its outcome for a who-rang-when record.
-- **A dashboard card** around the live view (§10) — a static preview image plus a toggle, wired to
-  the switch, instead of driving it from Developer Tools.
 
 These land as separate, documented commits.
 
