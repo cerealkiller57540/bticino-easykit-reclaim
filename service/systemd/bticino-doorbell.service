@@ -1,0 +1,34 @@
+[Unit]
+Description=BTicino EasyKit SIP endpoint (ring, photo, open, answering machine, live)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=<user>
+Group=<user>
+# Secrets sealed with systemd-creds (TPM2). systemd (PID 1) decrypts them into
+# $CREDENTIALS_DIRECTORY (tmpfs, read-only, owned by <user>) BEFORE ExecStart. No
+# password-manager access at boot => the endpoint comes back on its own after a reboot.
+LoadCredentialEncrypted=sip.key:/etc/bticino/creds/sip.key.cred
+LoadCredentialEncrypted=sip.crt:/etc/bticino/creds/sip.crt.cred
+LoadCredentialEncrypted=sip.pw:/etc/bticino/creds/sip.pw.cred
+LoadCredentialEncrypted=mqtt.user:/etc/bticino/creds/mqtt.user.cred
+LoadCredentialEncrypted=mqtt.pw:/etc/bticino/creds/mqtt.pw.cred
+# The pjsua config file (which carries the SIP password) is written here. systemd
+# creates /run/bticino at start and DELETES it at stop, even on SIGKILL
+# (PrivateTmp only covers /tmp and /var/tmp, not /run or /dev/shm).
+RuntimeDirectory=bticino
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 /home/<user>/bticino-proof/bticino_doorbell.py
+Restart=always
+RestartSec=30
+# Hardening.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+[Install]
+WantedBy=multi-user.target

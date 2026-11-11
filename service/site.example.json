@@ -1,0 +1,14 @@
+{
+ "sip_user": "<client-cn>",
+ "sip_domain": "<sip-domain>",
+ "sip_proxy": "<doorstation-ip>:<sips-port>",
+ "vault_sip": "<rbw item holding the SIP password + key/cert PEM in its notes>",
+ "vault_mqtt": "<rbw item holding the MQTT username/password>",
+ "mqtt_host": "<broker-host>",
+ "mqtt_port": 1883,
+ "open_targets": {
+  "gache": "<deviceAddr of the door-lock relay>",
+  "portail": "<deviceAddr of the gate relay>",
+  "lumiere": "<deviceAddr of the light relay>"
+ }
+}

@@ -8,9 +8,8 @@
 > **opened locally** over the same SIP channel ([§8](#8-opening-the-door-locally)), the client can
 > **answer and record a message** from the visitor instead of only photographing them, and a **live
 > view of the entrance can be pulled on demand** by placing an outgoing call to the door station
-> itself ([§10](#10-seeing-the-entrance-on-demand--a-live-view)) — photo, open and answer-and-record
-> running and proven, the live view newly deployed and still awaiting a full end-to-end check, all
-> cloud-free. What is left after that is polish on all of these; see
+> itself ([§10](#10-seeing-the-entrance-on-demand--a-live-view)) — all four running and proven end
+> to end, all cloud-free. What is left after that is polish on all of these; see
 > [§11](#11-work-in-progress--where-this-is-going).
 >
 > **What this does.** This project *reads* the door station — it knows when someone rings and grabs
@@ -21,15 +20,16 @@
 > ([§2](#2-decompiling-the-app--the-backbone)) showed that is false: it is local, and it is proven.
 >
 > **What this repo is — read this before you judge reproducibility.** This is a **method with
-> proofs**, not a drop-in product. What ships here reproduces the hard, transferable parts: the
-> toolchain build, the decompile, the Frida identity capture, the TLS handshake and the SIP
-> `REGISTER` ([`scripts/`](scripts/)). The always-on client that ties it together — catch the ring,
-> write the AVI, pull the frame, publish over MQTT, emit the open `MESSAGE` ([§8](#8-opening-the-door-locally)/[§9](#9-catching-the-ring-and-grabbing-a-photo)) — runs in the author's
-> house and is what "proven in production" refers to, but it is **not published**: it is welded to
-> device-specific identifiers that must not leave the owner's vault ([§7](#7-handling-the-identity-safely)).
-> So: the handshake and register are reproducible from this repo today; the ring/photo/open service
-> you must assemble yourself from the documented shape in §8–§9. Publishing a cleanly anonymised
-> version of that service is the main open task.
+> proofs**, not a drop-in product. [`scripts/`](scripts/) reproduces the hard, transferable parts:
+> the toolchain build, the decompile, the Frida identity capture, the TLS handshake and the SIP
+> `REGISTER`. The always-on client that ties it together — catch the ring, write the AVI, pull the
+> frame, publish over MQTT, emit the open `MESSAGE`, answer and record, pull the live view
+> ([§8](#8-opening-the-door-locally)–[§11](#11-work-in-progress--where-this-is-going)) — is
+> published in [`service/`](service/), byte for byte the files running in the author's house, with
+> every device-specific identifier moved out to a config file that never leaves the owner's machine
+> ([§7](#7-handling-the-identity-safely)). It needs the small pjsua patch in
+> [`pjsua-patch/`](pjsua-patch/). It is a reference implementation for one house, not a package:
+> expect to adapt it.
 >
 > **One load-bearing caveat, up front:** the whole approach rides on **mbedTLS 3.6.x**, whose LTS
 > support ends around **March 2027**, because the door only speaks static-ECDH cipher suites that
@@ -157,6 +157,11 @@ order:
 There is deliberately **no single "do everything" button**: the identity extraction (§3) is
 inherently interactive (a running emulator, a pairing flow you click through), so anyone promising a
 one-click AIO for *that* step is hand-waving. Everything on either side of it is scripted.
+
+Past the `REGISTER`, the always-on client lives in [`service/`](service/) and needs the video build
+of pjsua with the patch in [`pjsua-patch/`](pjsua-patch/). That build uses a newer pjproject
+revision than the `2.17` tag `00-setup-toolchain.sh` checks out. The base commit and the extra
+build settings are in [`pjsua-patch/README.md`](pjsua-patch/README.md).
 
 ---
 
@@ -495,10 +500,11 @@ command channel (an MQTT topic), and the open request is handed to it; it emits 
 from its already-registered endpoint (out of dialog — a `REGISTER` creates no dialog, and the open
 request isn't tied to a call). One registration, two jobs.
 
-> No real actuator address, method name, CN or SIP identity is published here — those are
-> device-specific and live only in the owner's vault (§7). What transfers is the shape: *decompile
-> the unlock path → it's a local SIP `MESSAGE` with a JSON-RPC body → send it from your one
-> registered client.*
+> No real actuator address, CN or SIP identity is published here — those are device-specific and
+> live only in the owner's vault (§7). The method names and the body layout are the vendor's, the
+> same on every kit, and they are in the published client ([`service/`](service/)). What transfers
+> is the shape: *decompile the unlock path → it's a local SIP `MESSAGE` with a JSON-RPC body → send
+> it from your one registered client.*
 
 ---
 
@@ -605,7 +611,8 @@ Then at runtime the client just:
 
 The whole path — ring → early-media AVI → frame by index → JPEG → MQTT camera in HA, and HA button
 → MQTT → local SIP `MESSAGE` → relay — runs on your LAN, with the cloud never in the loop, and is
-**proven in production**.
+**proven in production**. The client that does it is in [`service/`](service/); its real topics
+differ from the placeholders above and are listed in [`service/README.md`](service/README.md).
 
 ![The reclaimed door station in Home Assistant: an MQTT device exposing the gate / stairwell-light /
 gate-impulse buttons, the live-view and answering-machine controls, the ring/photo/last-call sensors,
@@ -676,8 +683,10 @@ the firewall policy nor the ring path.
 An outgoing call is placed from the same registered endpoint used throughout this project (§6),
 targeting the door station's own SIP URI, with a `sendrecv` video offer in the INVITE. Home
 Assistant exposes this as a simple switch over MQTT (same Discovery pattern as §9): turning it on
-places the call and starts recording; turning it off tears the call down. No real SIP URI, device
-address, or SDP attribute is published here — see §7 for why.
+places the call and starts recording; turning it off tears the call down. The `sendrecv` offer and
+the device-address attribute are added by the pjsua patch in [`pjsua-patch/`](pjsua-patch/), and
+the companion service below is [`service/bticino_live.py`](service/bticino_live.py). No real SIP
+URI or device address is published here — see §7 for why.
 
 ### Getting the call into Home Assistant as a camera
 
@@ -801,4 +810,6 @@ have the other generation.
 
 ## License
 
-The text of this write-up is released under the [MIT License](LICENSE).
+The text of this write-up, the scripts and the client in [`service/`](service/) are released under
+the [MIT License](LICENSE). The patch in [`pjsua-patch/`](pjsua-patch/) is a derivative of
+pjproject and is released under pjproject's license, GPL-2.0-or-later.

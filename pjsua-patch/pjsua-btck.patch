@@ -1,0 +1,375 @@
+diff --git a/pjsip-apps/src/pjsua/pjsua_app.c b/pjsip-apps/src/pjsua/pjsua_app.c
+index 9f1ef68..dc90a6a 100644
+--- a/pjsip-apps/src/pjsua/pjsua_app.c
++++ b/pjsip-apps/src/pjsua/pjsua_app.c
+@@ -20,6 +20,63 @@
+ 
+ #define THIS_FILE       "pjsua_app.c"
+ 
++/* BTCK: one AVI file per call (one recorder per ring). Everything is static so that
++ * struct app_config is untouched (frozen header -> only 2 .c files recompile). */
++static pjsua_call_id btck_avi_owner = PJSUA_INVALID_ID; /* call that owns the stream */
++static unsigned      btck_avi_seq   = 0;                /* same-second anti-collision */
++static char          btck_avi_name[PJ_MAXPATH];         /* current file name */
++static pj_bool_t     btck_uas[PJSUA_MAX_CALLS];          /* BTCK-DEVADDR: incoming call -> no DEVADDR injection */
++
++#if PJMEDIA_HAS_VIDEO
++static void avi_writer_cb(pjsua_avi_rec_id id, void *user_data); /* defined below */
++/* (Re)creates the AVI recorder under a fresh timestamped name. Returns PJ_SUCCESS, or
++ * leaves avi_rec_id INVALID on failure (non-fatal). Called at startup and every time
++ * the owning call hangs up. */
++static pj_status_t btck_avi_rotate(void)
++{
++    pj_time_val tv;
++    pj_str_t fname;
++    pj_status_t status;
++    int n, blen;
++    const char *base = app_config.avi_rec.ptr;
++    blen = (int)app_config.avi_rec.slen;
++
++    /* strip the .avi suffix from the base name, if present */
++    if (blen >= 4 && pj_ansi_strnicmp(base + blen - 4, ".avi", 4) == 0)
++        blen -= 4;
++
++    pj_gettimeofday(&tv);
++    n = pj_ansi_snprintf(btck_avi_name, sizeof(btck_avi_name),
++                         "%.*s_%ld_%u.avi", blen, base,
++                         (long)tv.sec, btck_avi_seq++);
++    if (n <= 0 || n >= (int)sizeof(btck_avi_name)) {
++        PJ_LOG(2, (THIS_FILE, "BTCK-AVI name too long, skip rotate"));
++        app_config.avi_rec_id = PJSUA_INVALID_ID;
++        app_config.avi_vid_slot = PJSUA_INVALID_ID;
++        app_config.avi_aud_slot = PJSUA_INVALID_ID;
++        return PJ_ETOOBIG;
++    }
++
++    fname = pj_str(btck_avi_name);
++    status = pjsua_avi_recorder_create(&fname, app_config.avi_rec_size,
++                                       NULL, NULL, 0, &app_config.avi_rec_id);
++    if (status != PJ_SUCCESS) {
++        PJ_PERROR(2, (THIS_FILE, status, "BTCK-AVI create failed"));
++        app_config.avi_rec_id = PJSUA_INVALID_ID;
++        app_config.avi_vid_slot = PJSUA_INVALID_ID;
++        app_config.avi_aud_slot = PJSUA_INVALID_ID;
++        return status;
++    }
++    app_config.avi_vid_slot = pjsua_avi_recorder_get_conf_port(
++                                  app_config.avi_rec_id, PJMEDIA_TYPE_VIDEO);
++    app_config.avi_aud_slot = pjsua_avi_recorder_get_conf_port(
++                                  app_config.avi_rec_id, PJMEDIA_TYPE_AUDIO);
++    pjsua_avi_recorder_set_cb(app_config.avi_rec_id, NULL, &avi_writer_cb);
++    PJ_LOG(3, (THIS_FILE, "BTCK-AVI-START %s", btck_avi_name));
++    return PJ_SUCCESS;
++}
++#endif
++
+ //#define STEREO_DEMO
+ //#define TRANSPORT_ADAPTER_SAMPLE
+ //#define HAVE_MULTIPART_TEST
+@@ -201,6 +258,8 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e)
+ 
+         /* Stop all ringback for this call */
+         ring_stop(call_id);
++        if (call_id >= 0 && call_id < (pjsua_call_id)PJSUA_MAX_CALLS)
++            btck_uas[call_id] = PJ_FALSE;
+ 
+         /* Cancel duration timer, if any */
+         if (app_config.call_data[call_id].timer.id != PJSUA_INVALID_ID) {
+@@ -262,6 +321,24 @@ static void on_call_state(pjsua_call_id call_id, pjsip_event *e)
+             app_config.dyn_rec_filename[0] = '\0';
+         }
+ 
++#if PJMEDIA_HAS_VIDEO
++        /* BTCK: the owning call hung up -> finalise the ring's AVI
++         * and create a fresh recorder for the next ring. */
++        if (app_config.avi_auto_rec && call_id == btck_avi_owner &&
++            app_config.avi_rec_id != PJSUA_INVALID_ID)
++        {
++            char btck_done[PJ_MAXPATH];
++            pj_ansi_strncpy(btck_done, btck_avi_name, sizeof(btck_done));
++            btck_done[sizeof(btck_done)-1] = '\0';
++            pjsua_avi_recorder_destroy(app_config.avi_rec_id);
++            app_config.avi_rec_id   = PJSUA_INVALID_ID;
++            app_config.avi_vid_slot = PJSUA_INVALID_ID;
++            app_config.avi_aud_slot = PJSUA_INVALID_ID;
++            btck_avi_owner = PJSUA_INVALID_ID;
++            PJ_LOG(3, (THIS_FILE, "BTCK-AVI-DONE %s", btck_done));
++            btck_avi_rotate();
++        }
++#endif
+         PJ_LOG(3,(THIS_FILE, "Call %d is DISCONNECTED [reason=%d (%.*s)]", 
+                   call_id,
+                   call_info.last_status,
+@@ -370,6 +447,8 @@ static void on_incoming_call(pjsua_acc_id acc_id, pjsua_call_id call_id,
+     PJ_UNUSED_ARG(acc_id);
+     PJ_UNUSED_ARG(rdata);
+ 
++    if (call_id >= 0 && call_id < (pjsua_call_id)PJSUA_MAX_CALLS)
++        btck_uas[call_id] = PJ_TRUE;
+     status = pjsua_call_get_info(call_id, &call_info);
+     if (status != PJ_SUCCESS) {
+         pjsua_perror(THIS_FILE, "Unable to get incoming call info", status);
+@@ -657,13 +736,18 @@ static void on_call_video_state(pjsua_call_info *ci, unsigned mi,
+ 
+ #if PJMEDIA_HAS_VIDEO
+     if (app_config.avi_auto_rec &&
+-        app_config.avi_vid_slot != PJSUA_INVALID_ID)
++        app_config.avi_vid_slot != PJSUA_INVALID_ID &&
++        (btck_avi_owner == PJSUA_INVALID_ID || btck_avi_owner == ci->id))
+     {
+         pjsua_conf_port_id pid;
+ 
+         pid = pjsua_call_get_vid_conf_port(ci->id, PJMEDIA_DIR_DECODING);
+-        if (pid != PJSUA_INVALID_ID)
+-            pjsua_vid_conf_connect(pid, app_config.avi_vid_slot, NULL);
++        if (pid != PJSUA_INVALID_ID) {
++            /* BTCK: bind only one call to the recorder (owner guard). */
++            if (pjsua_vid_conf_connect(pid, app_config.avi_vid_slot, NULL)
++                    == PJ_SUCCESS)
++                btck_avi_owner = ci->id;
++        }
+     }
+ #endif
+ 
+@@ -1296,6 +1380,42 @@ void on_playfile_done(pjmedia_port *port, void *usr_data)
+                                &delay);
+ }
+ 
++/* BTCK-DEVADDR: on the OUTGOING offer only, adds the DEVADDR session
++ * attribute (routes sip:diy@ to the door station camera) and offers the
++ * video as sendrecv. Inert when BTCK_DEVADDR is unset -> safe binary. */
++static void btck_on_call_sdp_created(pjsua_call_id call_id,
++                                     pjmedia_sdp_session *sdp,
++                                     pj_pool_t *pool,
++                                     const pjmedia_sdp_session *rem_sdp)
++{
++    const char *dev = getenv("BTCK_DEVADDR");
++    pjmedia_sdp_attr *a;
++    pj_str_t val;
++    unsigned i;
++    if (rem_sdp || !dev || !*dev)
++        return;
++    if (call_id >= 0 && call_id < (pjsua_call_id)PJSUA_MAX_CALLS
++        && btck_uas[call_id])
++        return;
++    pj_strdup2(pool, &val, dev);
++    a = pjmedia_sdp_attr_create(pool, "DEVADDR", &val);
++    if (pjmedia_sdp_attr_add(&sdp->attr_count, sdp->attr, a) != PJ_SUCCESS) {
++        PJ_LOG(2,(THIS_FILE, "BTCK-DEVADDR attr_add failed"));
++        return;
++    }
++    for (i = 0; i < sdp->media_count; ++i) {
++        pjmedia_sdp_media *m = sdp->media[i];
++        if (pj_stricmp2(&m->desc.media, "video") != 0)
++            continue;
++        pjmedia_sdp_media_remove_all_attr(m, "sendrecv");
++        pjmedia_sdp_media_remove_all_attr(m, "sendonly");
++        pjmedia_sdp_media_remove_all_attr(m, "inactive");
++        pjmedia_sdp_media_remove_all_attr(m, "recvonly");
++        m->attr[m->attr_count++] =
++            pjmedia_sdp_attr_create(pool, "sendrecv", NULL);
++    }
++    PJ_LOG(3,(THIS_FILE, "BTCK-DEVADDR injected (video sendrecv)"));
++}
+ /* Callback to replace the generated SDP with a custom one (--custom-sdp).
+  * Only compiled when PJSUA_MEDIA_HAS_PJMEDIA=0 (alt media backend). */
+ #if !PJSUA_MEDIA_HAS_PJMEDIA
+@@ -1709,6 +1829,7 @@ static pj_status_t app_init(void)
+ #if !PJSUA_MEDIA_HAS_PJMEDIA
+     app_config.cfg.cb.on_call_sdp_created = &on_call_sdp_created_cb;
+ #endif
++    app_config.cfg.cb.on_call_sdp_created = &btck_on_call_sdp_created;
+ #ifdef TRANSPORT_ADAPTER_SAMPLE
+     app_config.cfg.cb.on_create_media_transport = &on_create_media_transport;
+ #endif
+@@ -1894,24 +2015,9 @@ static pj_status_t app_init(void)
+ 
+     if (app_config.avi_rec.slen) {
+ #if PJMEDIA_HAS_VIDEO
+-        status = pjsua_avi_recorder_create(&app_config.avi_rec,
+-                                           app_config.avi_rec_size,
+-                                           NULL, NULL, 0,
+-                                           &app_config.avi_rec_id);
+-        if (status != PJ_SUCCESS) {
+-            PJ_PERROR(1, (THIS_FILE, status, "Error creating AVI recorder"));
+-            goto on_error;
+-        }
+-
+-        app_config.avi_vid_slot = pjsua_avi_recorder_get_conf_port(
+-                                                     app_config.avi_rec_id,
+-                                                     PJMEDIA_TYPE_VIDEO);
+-        app_config.avi_aud_slot = pjsua_avi_recorder_get_conf_port(
+-                                                     app_config.avi_rec_id,
+-                                                     PJMEDIA_TYPE_AUDIO);
+-
+-        pjsua_avi_recorder_set_cb(app_config.avi_rec_id, NULL, 
+-                                  &avi_writer_cb);
++        /* BTCK: first recorder through rotate() (timestamped name + START marker).
++         * Non-fatal on failure: the endpoint must start even without video capture. */
++        btck_avi_rotate();
+ #endif
+     }
+ 
+diff --git a/pjsip-apps/src/pjsua/pjsua_app_legacy.c b/pjsip-apps/src/pjsua/pjsua_app_legacy.c
+index 7472fb2..004f2a8 100644
+--- a/pjsip-apps/src/pjsua/pjsua_app_legacy.c
++++ b/pjsip-apps/src/pjsua/pjsua_app_legacy.c
+@@ -701,7 +701,7 @@ on_error:
+ /** UI Command **/
+ static void ui_make_new_call()
+ {
+-    char buf[128];
++    char buf[512];
+     pjsua_msg_data msg_data_;
+     input_result result;
+     pj_str_t tmp;
+@@ -754,7 +754,7 @@ static void ui_make_multi_call()
+ {
+     char menuin[32];
+     int count;
+-    char buf[128];
++    char buf[512];
+     input_result result;
+     pj_str_t tmp;
+     int i;
+@@ -811,8 +811,8 @@ static void ui_send_instant_message()
+     /* i is for call index to send message, if any */
+     int i = -1;
+     input_result result;
+-    char buf[128];
+-    char text[128];
++    char buf[512];
++    char text[512];
+     pj_str_t tmp;
+ 
+     /* Input destination. */
+@@ -879,7 +879,7 @@ static void ui_send_instant_message()
+ static void ui_answer_call()
+ {
+     pjsua_call_info call_info;
+-    char buf[128];
++    char buf[512];
+     pjsua_msg_data msg_data_;
+ 
+     if (current_call != -1) {
+@@ -983,7 +983,7 @@ static void ui_cycle_dialog(char menuin[])
+ static void ui_cycle_account()
+ {
+     int i;
+-    char buf[128];
++    char buf[512];
+ 
+     if (!simple_input("Enter account ID to select", buf, sizeof(buf)))
+         return;
+@@ -999,7 +999,7 @@ static void ui_cycle_account()
+ 
+ static void ui_add_buddy()
+ {
+-    char buf[128];
++    char buf[512];
+     pjsua_buddy_config buddy_cfg;
+     pjsua_buddy_id buddy_id;
+     pj_status_t status;
+@@ -1069,7 +1069,7 @@ static void ui_add_account(pjsua_transport_config *rtp_cfg)
+ 
+ static void ui_delete_buddy()
+ {
+-    char buf[128];
++    char buf[512];
+     int i;
+ 
+     if (!simple_input("Enter buddy ID to delete", buf, sizeof(buf)))
+@@ -1087,7 +1087,7 @@ static void ui_delete_buddy()
+ 
+ static void ui_delete_account()
+ {
+-    char buf[128];
++    char buf[512];
+     int i;
+ 
+     if (!simple_input("Enter account ID to delete", buf, sizeof(buf)))
+@@ -1209,7 +1209,7 @@ static void ui_call_transfer(pj_bool_t no_refersub)
+         PJ_LOG(3,(THIS_FILE, "No current call"));
+     } else {
+         int call = current_call;
+-        char buf[128];
++        char buf[512];
+         pjsip_generic_string_hdr refer_sub;
+         pj_str_t STR_REFER_SUB = { "Refer-Sub", 9 };
+         pj_str_t STR_FALSE = { "false", 5 };
+@@ -1267,7 +1267,7 @@ static void ui_call_transfer_replaces(pj_bool_t no_refersub)
+         pjsua_call_id ids[PJSUA_MAX_CALLS];
+         pjsua_call_info ci;
+         pjsua_msg_data msg_data_;
+-        char buf[128];
++        char buf[512];
+         unsigned i, count;
+ 
+         count = PJ_ARRAY_SIZE(ids);
+@@ -1349,7 +1349,7 @@ static void ui_send_dtmf_2833()
+         pj_str_t digits;
+         int call = current_call;
+         pj_status_t status;
+-        char buf[128];
++        char buf[512];
+ 
+ #if defined(PJMEDIA_HAS_DTMF_FLASH) && PJMEDIA_HAS_DTMF_FLASH!= 0               
+         if (!simple_input("DTMF strings to send (0-9*R#A-B)", buf,
+@@ -1384,7 +1384,7 @@ static void ui_send_dtmf_info()
+     } else {
+         int call = current_call;
+         pj_status_t status;
+-        char buf[128];
++        char buf[512];
+         pjsua_call_send_dtmf_param param;
+ 
+         if (!simple_input("DTMF strings to send (0-9*#A-B)", buf,
+@@ -1409,8 +1409,8 @@ static void ui_send_dtmf_info()
+ 
+ static void ui_send_arbitrary_request()
+ {
+-    char text[128];
+-    char buf[128];
++    char text[512];
++    char buf[512];
+     char *uri;
+     input_result result;
+     pj_str_t tmp;
+@@ -1518,7 +1518,7 @@ static void ui_sleep(char menuin[])
+ 
+ static void ui_subscribe(char menuin[])
+ {
+-    char buf[128];
++    char buf[512];
+     input_result result;
+ 
+     ui_input_url("(un)Subscribe presence of", buf, sizeof(buf), &result,
+@@ -1544,7 +1544,7 @@ static void ui_subscribe(char menuin[])
+ 
+ static void ui_subscribe_dlg_event(pj_bool_t sub)
+ {
+-    char buf[128];
++    char buf[512];
+     input_result result;
+ 
+     ui_input_url("(un)Subscribe dialog event of", buf, sizeof(buf), &result,
+@@ -1753,8 +1753,8 @@ static void ui_conf_connect(char menuin[])
+ 
+ static void ui_adjust_volume()
+ {
+-    char buf[128];
+-    char text[128];
++    char buf[512];
++    char text[512];
+     snprintf(buf, sizeof(buf), "Adjust mic level: [%4.1fx] ",
+              app_config.mic_level);
+     if (simple_input(buf,text,sizeof(text))) {
+@@ -1890,7 +1890,7 @@ static void ui_send_rtt()
+ void legacy_main(void)
+ {
+     char menuin[80];
+-    char buf[128];
++    char buf[512];
+ 
+     keystroke_help();
+ 

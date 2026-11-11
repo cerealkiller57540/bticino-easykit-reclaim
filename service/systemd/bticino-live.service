@@ -1,0 +1,29 @@
+[Unit]
+Description=BTicino door station: live call video to go2rtc
+After=network-online.target docker.service bticino-doorbell.service
+[Service]
+User=<user>
+Group=<user>
+ExecStart=/usr/bin/python3 /home/<user>/bticino-proof/bticino_live.py
+Restart=always
+RestartSec=5
+Nice=10
+MemoryMax=300M
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/run/bticino
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+[Install]
+WantedBy=multi-user.target
